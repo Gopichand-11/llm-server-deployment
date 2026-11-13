@@ -1,30 +1,27 @@
 
 import os
-import httpx
 
 from typing import Literal
+
 from fastapi import FastAPI, HTTPException
+from groq import (
+    AsyncGroq,
+    APIConnectionError,
+    APIStatusError,
+    RateLimitError
+)
 from pydantic import BaseModel
 
 
-# Initialize FastAPI
 app = FastAPI(
     title="LLM Server Deployment",
-    description="FastAPI backend connected to Ollama",
+    description="FastAPI backend connected to Groq",
     version="1.0.0"
 )
 
 
-# Configuration
-OLLAMA_URL = os.getenv(
-    "OLLAMA_URL",
-    "http://127.0.0.1:11434/api/chat"
-)
-
-MODEL_NAME = os.getenv(
-    "MODEL_NAME",
-    "llama3.2"
-)
+# Groq configuration
+MODEL_NAME = os.getenv("MODEL_NAME", "")
 
 
 # Request models
@@ -42,18 +39,17 @@ class ChatResponse(BaseModel):
     model: str
 
 
-# Health check endpoint
+# Health check
 @app.get("/")
 async def root():
-    return {
-        "message": "LLM Backend is running"
-    }
+    return {"message": "LLM Backend is running"}
 
 
 @app.get("/health")
 async def health():
     return {
         "status": "healthy",
+        "provider": "Groq",
         "model": MODEL_NAME
     }
 
@@ -62,46 +58,54 @@ async def health():
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
 
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Groq API key is not configured"
+        )
+
+    if not MODEL_NAME:
+        raise HTTPException(
+            status_code=500,
+            detail="Groq model is not configured"
+        )
+
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        client = AsyncGroq(api_key=api_key)
 
-            response = await client.post(
-                OLLAMA_URL,
-                json={
-                    "model": MODEL_NAME,
-                    "messages": [
-                        message.model_dump()
-                        for message in request.messages
-                    ],
-                    "stream": False
-                }
-            )
-
-            response.raise_for_status()
-
-            result = response.json()
-
-            answer = result["message"]["content"]
-
-            return ChatResponse(
-                answer=answer,
-                model=MODEL_NAME
-            )
-
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=504,
-            detail="Ollama request timed out"
+        completion = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                message.model_dump()
+                for message in request.messages
+            ],
+            temperature=0.7,
+            max_completion_tokens=1024
         )
 
-    except httpx.HTTPStatusError as error:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Ollama returned an error: {error.response.text}"
+        answer = completion.choices[0].message.content
+
+        return ChatResponse(
+            answer=answer or "",
+            model=MODEL_NAME
         )
 
-    except httpx.RequestError:
+    except RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="Groq API rate limit or quota exceeded"
+        )
+
+    except APIConnectionError:
         raise HTTPException(
             status_code=503,
-            detail="Unable to connect to Ollama"
+            detail="Unable to connect to Groq"
+        )
+
+    except APIStatusError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Groq API error: {error.status_code}"
         )
