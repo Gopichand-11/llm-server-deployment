@@ -6,22 +6,25 @@ import streamlit as st
 
 # Page configuration
 st.set_page_config(
-    page_title="Llama 3.2 Chatbot",
+    page_title="Groq LLM Chatbot",
     page_icon="🤖",
     layout="centered"
 )
 
 
 # Backend configuration
-BACKEND_URL = os.getenv(
-    "BACKEND_URL",
-    "http://127.0.0.1:8000"
-)
+BACKEND_URL = os.getenv("BACKEND_URL", "").rstrip("/")
 
 
 # Application title
-st.title("🤖 Llama 3.2 Chatbot")
-st.caption("Powered by FastAPI and Ollama")
+st.title("🤖 Groq LLM Chatbot")
+st.caption("Powered by FastAPI and Groq GPT-OSS-20B")
+
+
+# Validate backend configuration
+if not BACKEND_URL:
+    st.error("Backend URL is not configured.")
+    st.stop()
 
 
 # Initialize conversation history
@@ -41,7 +44,7 @@ prompt = st.chat_input("Ask something...")
 
 if prompt:
 
-    # Add user message to history
+    # Add user message
     st.session_state.messages.append({
         "role": "user",
         "content": prompt
@@ -50,7 +53,7 @@ if prompt:
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate assistant response
+    # Generate response
     with st.chat_message("assistant"):
 
         with st.spinner("Generating response..."):
@@ -70,7 +73,6 @@ if prompt:
 
                 st.markdown(answer)
 
-                # Save assistant response
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer
@@ -82,7 +84,6 @@ if prompt:
                     f"Unable to connect to backend: {error}"
                 )
 
-                # Remove failed user message
                 st.session_state.messages.pop()
 
 
